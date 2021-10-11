@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
-	"path/filepath"
 
 	"github.com/microcosm-cc/bluemonday"
 	"github.com/russross/blackfriday/v2"
@@ -36,21 +36,29 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := run(*filename); err != nil {
+	if err := run(*filename, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func run(filename string) error {
+func run(filename string, out io.Writer) error {
 	input, err := ioutil.ReadFile(filename)
 	if err != nil {
 		return err
 	}
 	htmlData := parseContent(input)
 
-	outName := fmt.Sprintf("%s.html", filepath.Base(filename))
-	fmt.Println(outName)
+	temp, err := ioutil.TempFile("", "mdp*.html")
+	if err != nil {
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+
+	outName := temp.Name()
+	fmt.Fprintln(out, outName)
 
 	return saveHTML(outName, htmlData)
 }
