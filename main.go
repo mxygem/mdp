@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"html/template"
 	"io"
 	"io/ioutil"
 	"os"
@@ -16,23 +17,28 @@ import (
 )
 
 const (
-	header = `<!DOCTYPE html>
+	defaultTemplate = `<!DOCTYPE html>
 <html>
 	<head>
 		<meta http-equiv="content-type" content="text/html; charset=utf-8">
-		<title>Markdown Preview Tool</title>
+		<title>{{ .Title }}</title>
 	</head>
 	<body>
-`
-	footer = `
+{{ .Body }}
 	</body>
 </html>
 `
 )
 
+type content struct {
+	Title string
+	Body  template.HTML
+}
+
 func main() {
 	filename := flag.String("file", "", "markdown file to preview")
 	skipPreview := flag.Bool("s", false, "skip auto-preview")
+	tFilename := flag.String("t", "", "alternate template name")
 	flag.Parse()
 
 	if *filename == "" {
@@ -40,18 +46,22 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := run(*filename, os.Stdout, *skipPreview); err != nil {
+	if err := run(*filename, *tFilename, os.Stdout, *skipPreview); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func run(filename string, out io.Writer, skipPreview bool) error {
+func run(filename, tFilename string, out io.Writer, skipPreview bool) error {
 	input, err := ioutil.ReadFile(filename)
 	if err != nil {
 		return err
 	}
-	htmlData := parseContent(input)
+
+	htmlData, err := parseContent(input, tFilename)
+	if err != nil {
+		return err
+	}
 
 	temp, err := ioutil.TempFile("", "mdp*.html")
 	if err != nil {
@@ -77,16 +87,33 @@ func run(filename string, out io.Writer, skipPreview bool) error {
 	return preview(outName)
 }
 
-func parseContent(input []byte) []byte {
+func parseContent(input []byte, tFilename string) ([]byte, error) {
 	output := blackfriday.Run(input)
 	body := bluemonday.UGCPolicy().SanitizeBytes(output)
 
-	var buffer bytes.Buffer
-	buffer.WriteString(header)
-	buffer.Write(body)
-	buffer.WriteString(footer)
+	t, err := template.New("mdp").Parse(defaultTemplate)
+	if err != nil {
+		return nil, err
+	}
 
-	return buffer.Bytes()
+	if tFilename != "" {
+		t, err = template.ParseFiles(tFilename)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	c := content{
+		Title: "Markdown Preview Tool",
+		Body:  template.HTML(body),
+	}
+
+	var buffer bytes.Buffer
+	if err := t.Execute(&buffer, c); err != nil {
+		return nil, err
+	}
+
+	return buffer.Bytes(), nil
 }
 
 func saveHTML(outName string, data []byte) error {
